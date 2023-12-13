@@ -1,10 +1,11 @@
 import copy
 import time
-from typing import Callable, List, Tuple
+from typing import Callable, List, Tuple, Union
 import torch
 from tqdm import tqdm
 
 from utils.weight_utils import extract_weights, get_weights_count, load_weights, snap_weights, update_weights
+from utils.chekpoints import save_checkpoint, validate
 
 
 def compute_jacobian(model: torch.nn.Module, x: torch.Tensor) -> torch.Tensor:
@@ -47,6 +48,8 @@ def levenberg_step(
     y: torch.Tensor,
     loss_fn: Callable,
     mu: float,
+    val_loader: Union[torch.nn.DataLoader, None] = None,
+    snap_folder: Union[str, None] = None,
     inner_steps: int = 10,
     demping_coef: float = 10,
     device: str = "cuda:0",
@@ -59,6 +62,9 @@ def levenberg_step(
         y (torch.Tensor): целевые метки
         loss_fn (Callable): функция ошибки (потерь)
         mu (float): начальное значение коэффициента регуляризации
+        val_loader (Union[torch.nn.DataLoader, None]) даталодер с валидационными данными
+            (если есть - критерий останова на нем). Defaults to None.
+        snap_folder (Union[str, None] = None) папка в которую складывать модели, если нет - не будет чекпоинтов
         inner_steps (int, optional): количество внутренних шагов. Defaults to 10.
         demping_coef (float, optional): коэффициент изменения регуляризации. Defaults to 10.
         device (str, optional): устройство вычислений. Defaults to "cuda:0".
@@ -85,14 +91,7 @@ def levenberg_step(
     last_loss = loss_fn(output, y)
     jac = compute_jacobian(model, x)
 
-    # TODO разобраться с многовыходным случаем, пока наивно
-    if output.ndim > 2:
-        raise NotImplementedError("Для многомерного выхода - не имплементированно")
-    if output.shape[-1] > 1:
-        error = torch.argmax(y, dim=1) - torch.argmax(output, dim=1)
-    else:
-        error = y - output
-    grad = jac.T @ error
+    grad = jac.T @ (y - output)
     snap = snap_weights(model)
 
     for i in range(inner_steps):
@@ -115,13 +114,15 @@ def train_levenberg(
     x: torch.Tensor,
     y: torch.Tensor,
     loss_fn: Callable,
+    val_loader: Union[torch.utils.data.DataLoader, None] = None,
+    snap_folder: Union[str, None] = None,
     mu_init: float = 10,
     min_error: float = 1e-2,
     max_epochs: int = 10,
     inner_steps: int = 10,
     demping_coef: float = 10,
     device: str = "cuda:0",
-) -> Tuple[List[float], List[float], List[float]]:
+) -> Tuple[List[float], List[float], List[float], List[float]]:
     """Обучение с помощью алгоритма Левенберга-Марквардта на GPU (все матрицы в памяти, нет кеширования на диск)
 
     Args:
@@ -129,6 +130,9 @@ def train_levenberg(
         x (torch.Tensor): входные данные
         y (torch.Tensor): целевые метки
         loss_fn (Callable): функция ошибки (потерь)
+        val_loader (Union[torch.utils.data.DataLoader, None]) даталодер с валидационными данными
+            (если есть - критерий останова на нем). Defaults to None.
+        snap_folder (Union[str, None] = None) папка в которую складывать модели, если нет - не будет чекпоинтов
         mu_init (float, optional): начальное значение коэффициента регуляризации. Defaults to 10.
         min_error (float, optional): минимальная ошибка при которой останавливается обучение. Defaults to 1e-2.
         max_epochs (int, optional): максимльное число эпох при которых останавливается обучение. Defaults to 10.
@@ -137,10 +141,14 @@ def train_levenberg(
         device (str, optional): устройство вычислений. Defaults to "cuda:0".
 
     Returns:
-        Tuple[List[float], List[float], List[float]]: кортеж со списками истории обучения: ошибка, регуляризатор (mu) и
-            время вычислений на эпоху
+        Tuple[List[float], List[float], List[float], List[float]]:
+            кортеж со списками истории обучения: ошибка, ошибка валидации, регуляризатор (mu), время вычислений на эпоху
     """
     loss_history = []
+    val_loss_hisory = []
+    if val_loader is not None:
+        val_loss_hisory.append(validate(model, val_loader, loss_fn))
+
     mu_history = [mu_init]
     ep_time = [0]
 
@@ -150,7 +158,7 @@ def train_levenberg(
 
     pbar = tqdm(range(max_epochs))
     pbar.set_description(f"Loss: {loss_history[-1]:.4f}")
-    for _ in pbar:
+    for ep in pbar:
         start_ep = time.time()
         mu, loss = levenberg_step(
             model, x, y, loss_fn, mu, inner_steps=inner_steps, demping_coef=demping_coef, device=device
@@ -158,7 +166,23 @@ def train_levenberg(
         ep_time.append(time.time() - start_ep)
         loss_history.append(loss)
         mu_history.append(mu)
-        pbar.set_description(f"Loss: {loss_history[-1]:.4f}")
-        if loss <= min_error:
-            break
-    return loss_history, mu_history, ep_time
+
+        addition = ""
+        if val_loader is not None:
+            val_loss = validate(model, val_loader, loss_fn)
+            val_loss_hisory.append(val_loss)
+            addition = f" val: {val_loss:.3f}"
+
+        if snap_folder is not None:
+            save_checkpoint(model, snap_folder, ep)
+
+        pbar.set_description(f"MSE: {loss:.3f}{addition}")
+        pbar.update(1)
+        if val_loader is None:
+            if loss <= min_error:
+                break
+        else:
+            if val_loss <= min_error:
+                break
+
+    return loss_history, val_loss_hisory, mu_history, ep_time

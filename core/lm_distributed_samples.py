@@ -2,13 +2,14 @@ import copy
 import os
 import shutil
 import time
-from typing import List, Tuple
+from typing import List, Tuple, Union
 
 import numpy as np
 import dask
 import torch
 from tqdm import tqdm
 from core.chunk_utils import load_delayed
+from utils.chekpoints import save_checkpoint, validate
 
 from utils.weight_utils import extract_weights, get_weights_count, load_weights, snap_weights, update_weights
 
@@ -59,7 +60,6 @@ def distributed_jac(
             jac.append(_t_jac.reshape((x_batch.shape[0], -1)).cpu().detach().numpy())
         jac = np.hstack(jac)
         np.save(os.path.join(temp_folder, f"jacobian_{idx:06d}"), jac)
-
         # Loss
         with torch.no_grad():
             output = model(x_batch)
@@ -67,14 +67,7 @@ def distributed_jac(
             loss.append(_t_loss.item())
 
             # Глобальная невязка
-
-            # TODO разобраться с многовыходным случаем, пока наивно
-            if output.ndim > 2:
-                raise NotImplementedError("Для многомерного выхода - не имплементированно")
-            if output.shape[-1] > 1:
-                error = (torch.argmax(y_batch, dim=1) - torch.argmax(output, dim=1)).cpu().detach().numpy()
-            else:
-                error = (y_batch - output).cpu().detach().numpy()
+            error = (y_batch - output).cpu().detach().numpy()
             np.save(os.path.join(temp_folder, f"error_{idx:06d}"), error)
 
     del jac_model  # cleaning up
@@ -122,9 +115,9 @@ def distributed_levenberg_step(
     grad = (jac.T @ error).compute()
     snap = snap_weights(model)
 
-    for i in range(inner_steps):
-        approx_hess = jac.T @ jac + mu * dask.array.eye(jac.shape[1])
-        approx_hess = torch.linalg.inv(torch.tensor(approx_hess.compute()).float().to(device).float())
+    for _ in range(inner_steps):
+        approx_hess = (jac.T @ jac + mu * dask.array.eye(jac.shape[1])).astype(np.float32).compute()
+        approx_hess = torch.linalg.inv(torch.tensor(approx_hess).float().to(device).float())
         delta_w = approx_hess @ torch.tensor(grad).float().to(device)
         delta_w = delta_w.flatten()
 
@@ -152,6 +145,8 @@ def train_distributed_levenberg(
     model: torch.nn.Module,
     x_loader: torch.utils.data.DataLoader,
     loss_fn: torch.nn.Module,
+    val_loader: Union[torch.utils.data.DataLoader, None] = None,
+    snap_folder: Union[str, None] = None,
     mu_init: int = 10,
     min_error: float = 1e-2,
     max_epochs: int = 10,
@@ -159,13 +154,16 @@ def train_distributed_levenberg(
     demping_coef: float = 10,
     device: str = "cuda:0",
     temp_folder: str = "./temp",
-) -> Tuple[List[float], List[float], List[float]]:
+) -> Tuple[List[float], List[float], List[float], List[float]]:
     """Распределенное вычисление (по обучающим примерам) алгоритма Левенберга-Марквардта
 
     Args:
         model (torch.nn.Module): модель для которой считается якобиан
         x_loader (torch.utils.data.DataLoader): объект даталодера torch, batchsize будет соответсвовать размеру чанка
         loss_fn (torch.nn.Module): функция ошибки
+        val_loader (Union[torch.utils.data.DataLoader, None]) даталодер с валидационными данными
+            (если есть - критерий останова на нем). Defaults to None.
+        snap_folder (Union[str, None] = None) папка в которую складывать модели, если нет - не будет чекпоинтов
         mu_init (int, optional): начальное значение коэффициента регуляризации. Defaults to 10.
         min_error (float, optional): минимальная ошибка при которой останавливается обучение. Defaults to 1e-2.
         max_epochs (int, optional): максимльное число эпох при которых останавливается обучение. Defaults to 10.
@@ -175,10 +173,14 @@ def train_distributed_levenberg(
         temp_folder (str, optional): папка с кешами. Defaults to "./temp".
 
     Returns:
-        Tuple[List[float], List[float], List[float]]: кортеж со списками истории обучения: ошибка, регуляризатор (mu) и
-            время вычислений на эпоху
+        Tuple[List[float], List[float], List[float], List[float]]:
+            кортеж со списками истории обучения: ошибка, ошибка валидации, регуляризатор (mu), время вычислений на эпоху
     """
     loss_history = []
+    val_loss_hisory = []
+    if val_loader is not None:
+        val_loss_hisory.append(validate(model, val_loader, loss_fn))
+
     mu_history = [mu_init]
     ep_time = [0]
     mu = mu_init
@@ -212,10 +214,24 @@ def train_distributed_levenberg(
         loss_history.append(loss)
         mu_history.append(mu)
 
+        addition = ""
+        if val_loader is not None:
+            val_loss = validate(model, val_loader, loss_fn)
+            val_loss_hisory.append(val_loss)
+            addition = f" val: {val_loss:.3f}"
+
+        if snap_folder is not None:
+            save_checkpoint(model, snap_folder, ep)
+
         pbar.update(1)
-        pbar.set_description(f"MSE: {loss:.3f}")
-        if loss <= min_error:
-            break
+        pbar.set_description(f"MSE: {loss:.3f}{addition}")
+
+        if val_loader is None:
+            if loss <= min_error:
+                break
+        else:
+            if val_loss <= min_error:
+                break
 
     shutil.rmtree(temp_folder)
-    return loss_history, mu_history, ep_time
+    return loss_history, val_loss_hisory, mu_history, ep_time
