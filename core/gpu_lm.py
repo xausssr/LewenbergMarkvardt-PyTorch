@@ -4,7 +4,7 @@ from typing import Callable, List, Tuple
 import torch
 from tqdm import tqdm
 
-from utils.weight_utils import extract_weights, load_weights, snap_weights, update_weights
+from utils.weight_utils import extract_weights, get_weights_count, load_weights, snap_weights, update_weights
 
 
 def compute_jacobian(model: torch.nn.Module, x: torch.Tensor) -> torch.Tensor:
@@ -66,6 +66,21 @@ def levenberg_step(
     Returns:
         Tuple[float, float]: кортеж с коэффициентом регуляризации (mu) и ошибка после шага алгоритма
     """
+    w_count = get_weights_count(model)
+    obj_count = x.shape[0]
+
+    if obj_count > 5_000:
+        if w_count > 5000:
+            raise RuntimeError(
+                f"Слишком много данных для вычисления на GPU ({obj_count}x{w_count}), используйте "
+                "распределенный вариант"
+            )
+        else:
+            raise RuntimeError(
+                f"Слишком много данных для вычисления на GPU ({obj_count}x{w_count})"
+                ", используйте core.lm_distributed_samples"
+            )
+
     output = model(x)
     last_loss = loss_fn(output, y)
     jac = compute_jacobian(model, x)

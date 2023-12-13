@@ -93,3 +93,19 @@ def update_weights(model: torch.nn.Module, w: torch.Tensor, device: str = "cuda:
     for param in model.parameters():
         param.data = w[idx : idx + np.prod(param.shape)].reshape(param.shape).to(device)
         idx += np.prod(param.shape)
+
+
+def get_weights_count(model: torch.nn.Module) -> int:
+    """Вычисляет количество параметров (весов) модели
+
+    Args:
+        model (torch.nn.Module): модель, для которой нужно вычислить число параметров
+
+    Returns:
+        int: число параметров модели
+    """
+    count = 0
+    for p in model.parameters():
+        count += np.prod(p.shape)
+
+    return count
