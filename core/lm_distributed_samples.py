@@ -67,7 +67,14 @@ def distributed_jac(
             loss.append(_t_loss.item())
 
             # Глобальная невязка
-            error = (y_batch - output).cpu().detach().numpy()
+
+            # TODO разобраться с многовыходным случаем, пока наивно
+            if output.ndim > 2:
+                raise NotImplementedError("Для многомерного выхода - не имплементированно")
+            if output.shape[-1] > 1:
+                error = (torch.argmax(y_batch, dim=1) - torch.argmax(output, dim=1)).cpu().detach().numpy()
+            else:
+                error = (y_batch - output).cpu().detach().numpy()
             np.save(os.path.join(temp_folder, f"error_{idx:06d}"), error)
 
     del jac_model  # cleaning up

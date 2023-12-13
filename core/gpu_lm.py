@@ -84,7 +84,15 @@ def levenberg_step(
     output = model(x)
     last_loss = loss_fn(output, y)
     jac = compute_jacobian(model, x)
-    grad = jac.T @ (y - output)
+
+    # TODO разобраться с многовыходным случаем, пока наивно
+    if output.ndim > 2:
+        raise NotImplementedError("Для многомерного выхода - не имплементированно")
+    if output.shape[-1] > 1:
+        error = torch.argmax(y, dim=1) - torch.argmax(output, dim=1)
+    else:
+        error = y - output
+    grad = jac.T @ error
     snap = snap_weights(model)
 
     for i in range(inner_steps):

@@ -1,5 +1,6 @@
 import glob
 import dask
+import dask.array
 import numpy as np
 
 
