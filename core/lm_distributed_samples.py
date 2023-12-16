@@ -33,7 +33,7 @@ def distributed_jac(
     """
     w_count = get_weights_count(model)
 
-    if w_count > 5000:
+    if w_count > 7_000:
         raise NotImplementedError(f"Слишком большая сеть (число параметров = {w_count}). Данный случай не разработан")
 
     jac_model = copy.deepcopy(model)
@@ -51,14 +51,15 @@ def distributed_jac(
         # Якобиан
         jac = []
         for i, (name, param) in enumerate(zip(all_names, all_params)):
-            _t_jac = torch.autograd.functional.jacobian(
-                lambda param: param_as_input_func(jac_model, x_batch, param),
-                param,
-                strict=True if i == 0 else False,
-                vectorize=False if i == 0 else True,
+            jac.append(
+                torch.autograd.functional.jacobian(
+                    lambda param: param_as_input_func(jac_model, x_batch, param),
+                    param,
+                ).flatten(start_dim=2)
             )
-            jac.append(_t_jac.reshape((x_batch.shape[0], -1)).cpu().detach().numpy())
-        jac = np.hstack(jac)
+
+        jac = torch.cat(jac, dim=2)
+        jac = jac.flatten(start_dim=0, end_dim=1).detach().cpu().numpy()
         np.save(os.path.join(temp_folder, f"jacobian_{idx:06d}"), jac)
         # Loss
         with torch.no_grad():
@@ -67,7 +68,7 @@ def distributed_jac(
             loss.append(_t_loss.item())
 
             # Глобальная невязка
-            error = (y_batch - output).cpu().detach().numpy()
+            error = (y_batch - output).cpu().detach().numpy().reshape((-1, 1))
             np.save(os.path.join(temp_folder, f"error_{idx:06d}"), error)
 
     del jac_model  # cleaning up

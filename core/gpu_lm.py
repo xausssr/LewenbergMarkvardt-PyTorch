@@ -30,16 +30,16 @@ def compute_jacobian(model: torch.nn.Module, x: torch.Tensor) -> torch.Tensor:
 
     jac = []
     for i, (name, param) in enumerate(zip(all_names, all_params)):
-        _t_jac = torch.autograd.functional.jacobian(
-            lambda param: param_as_input_func(jac_model, x, param),
-            param,
-            strict=True if i == 0 else False,
-            vectorize=False if i == 0 else True,
+        jac.append(
+            torch.autograd.functional.jacobian(
+                lambda param: param_as_input_func(jac_model, x, param),
+                param,
+            ).flatten(start_dim=2)
         )
-        jac.append(_t_jac.reshape((x.shape[0], -1)))
 
+    jac = torch.cat(jac, dim=2)
     del jac_model  # cleaning up
-    return torch.cat(jac, dim=-1)
+    return jac.flatten(start_dim=0, end_dim=1)
 
 
 def levenberg_step(
@@ -75,8 +75,8 @@ def levenberg_step(
     w_count = get_weights_count(model)
     obj_count = x.shape[0]
 
-    if obj_count > 5_000:
-        if w_count > 5000:
+    if obj_count > 7_000:
+        if w_count > 7_000:
             raise RuntimeError(
                 f"Слишком много данных для вычисления на GPU ({obj_count}x{w_count}), используйте "
                 "распределенный вариант"
@@ -91,7 +91,7 @@ def levenberg_step(
     last_loss = loss_fn(output, y)
     jac = compute_jacobian(model, x)
 
-    grad = jac.T @ (y - output)
+    grad = jac.T @ (y - output).flatten()
     snap = snap_weights(model)
 
     for i in range(inner_steps):
