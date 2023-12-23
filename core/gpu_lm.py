@@ -75,8 +75,8 @@ def levenberg_step(
     w_count = get_weights_count(model)
     obj_count = x.shape[0]
 
-    if obj_count > 7_000:
-        if w_count > 7_000:
+    if obj_count > 20_000:
+        if w_count > 20_000:
             raise RuntimeError(
                 f"Слишком много данных для вычисления на GPU ({obj_count}x{w_count}), используйте "
                 "распределенный вариант"

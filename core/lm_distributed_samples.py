@@ -33,7 +33,7 @@ def distributed_jac(
     """
     w_count = get_weights_count(model)
 
-    if w_count > 7_000:
+    if w_count > 30_000:
         raise NotImplementedError(f"Слишком большая сеть (число параметров = {w_count}). Данный случай не разработан")
 
     jac_model = copy.deepcopy(model)
