@@ -142,6 +142,7 @@ def distributed_levenberg_step(
     return mu, curr_loss
 
 
+# TODO добавить отключение прогресбара при обучении
 def train_distributed_levenberg(
     model: torch.nn.Module,
     x_loader: torch.utils.data.DataLoader,

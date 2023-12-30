@@ -1,3 +1,6 @@
+import math
+import os
+import pickle
 from typing import List, Tuple
 import numpy as np
 import torch
@@ -109,3 +112,98 @@ def get_weights_count(model: torch.nn.Module) -> int:
         count += np.prod(p.shape)
 
     return count
+
+
+def get_layers_config(
+    model: torch.nn.Module, in_size: int, max_params: int = 7000
+) -> Tuple[List[List[int]], List[torch.nn.Parameter], List[torch.nn.Parameter]]:
+    """Получение конфигурации сети для полносвязного персептрона - разбиение по слоям
+
+    Args:
+        model (torch.nn.Module): модель
+        in_size (int): размерность входа
+        max_params (int): максимальное количество параметров в слое
+
+    Returns:
+        Tuple[List[List[int]], List[torch.nn.Parameter], List[torch.nn.Parameter]]:
+            * список с количеством нейронов в каждом линейном слое (разбитый по максимуму параметров)
+            * список ссылок на тензоры весов
+            * список ссылок на тензоры смещений
+    """
+
+    layers = []
+
+    weights = []
+    biases = []
+    for idx, param in enumerate(model.parameters()):
+        if idx % 2 == 0:
+            layers.append(param.shape[0])
+            weights.append(param)
+        else:
+            biases.append(param)
+
+    layers_config = []
+    prev_size = in_size
+    for idx, layer in enumerate(layers):
+        total_params = prev_size * layer + layer
+        if total_params < max_params:
+            layer_split = [layer]
+        else:
+            max_neurons = math.floor(layer / (prev_size * layer / max_params))
+            curr_neurons = 0
+            layer_split = []
+            while curr_neurons < layer:
+                if layer - curr_neurons < max_neurons:
+                    _temp_size = layer - curr_neurons
+                else:
+                    if max_neurons // 10 == 0:
+                        raise RuntimeError(f"Слишком большой слой ({total_params}) - слой {idx}")
+                    if max_neurons // 10 < 3:
+                        low_border = 3
+                    else:
+                        low_border = max_neurons - max_neurons // 10
+                    _temp_size = np.random.randint(low_border, max_neurons)
+                layer_split.append(_temp_size)
+                curr_neurons += _temp_size
+        prev_size = layer
+        layers_config.append(layer_split)
+    return layers_config, weights, biases
+
+
+def create_layer_from_parts(
+    base_path: str,
+    weight: torch.nn.Parameter,
+    bias: torch.nn.Parameter,
+    layer_idx: int,
+) -> None:
+    """Собираем слой из кешей (для вычисления по блокам)
+
+    Args:
+        base_path (str): базовый путь до папки с кешированными данными
+        weight (torch.nn.Parameter): объект весов сети, в который необходимо установить веса
+        bias (torch.nn.Parameter): объект весов сети, в который необходимо установить смещения
+        layer_idx (int): индекс слоя (0 - входной)
+    """
+
+    w = []
+    b = []
+    for folder in os.listdir(base_path):
+        if "block" in folder:
+            if int(folder.split("_")[1].split("_")[0]) == layer_idx:
+                _history = pickle.load(open(os.path.join(base_path, folder, "train_history.bin"), "rb"))
+                _best_idx = np.argmin(_history["val"])
+                base_net = pickle.load(open(os.path.join(base_path, folder, "topology.bin"), "rb"))
+                base_net.load_state_dict(
+                    torch.load(os.path.join(base_path, folder, f"epoch_{_best_idx:06d}.pth"), map_location="cpu")
+                )
+                for idx, param in enumerate(base_net.parameters()):
+                    if idx == 2:
+                        break
+                    if idx == 0:
+                        w.append(param.data)
+                    else:
+                        b.append(param.data)
+    w = torch.cat(w, dim=0)
+    b = torch.cat(b, dim=0)
+    weight.data = w.detach().cpu()
+    bias.data = b.detach().cpu()
