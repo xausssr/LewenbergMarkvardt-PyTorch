@@ -6,7 +6,7 @@ from aiohttp_retry import Union
 import torch
 from core.lm_distributed_samples import train_distributed_levenberg
 from utils.data_utils import create_intermediate_dataset
-from utils.visualisation_utils import plot_train_history
+from utils.visualisation_utils import plot_train_report_group
 
 from utils.weight_utils import create_layer_from_parts, get_layers_config
 
@@ -104,6 +104,6 @@ def train_layer_separeate(
             )
         prev_size = sum(layer)
 
-    plot_train_history(temp_folder)
+    plot_train_report_group(temp_folder)
     shutil.rmtree(temp_folder)
     return
