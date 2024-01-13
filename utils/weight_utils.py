@@ -114,7 +114,7 @@ def get_weights_count(model: torch.nn.Module) -> int:
     return count
 
 
-def get_layers_config(
+def get_groups_config(
     model: torch.nn.Module, in_size: int, max_params: int = 7000
 ) -> Tuple[List[List[int]], List[torch.nn.Parameter], List[torch.nn.Parameter]]:
     """Получение конфигурации сети для полносвязного персептрона - разбиение по слоям

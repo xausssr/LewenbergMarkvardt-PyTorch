@@ -8,10 +8,10 @@ from core.lm_distributed_samples import train_distributed_levenberg
 from utils.data_utils import create_intermediate_dataset
 from utils.visualisation_utils import plot_train_report_group
 
-from utils.weight_utils import create_layer_from_parts, get_layers_config
+from utils.weight_utils import create_layer_from_parts, get_groups_config
 
 
-def train_layer_separeate(
+def train_group_separeate(
     model: torch.nn.Sequential,
     x_loader: torch.utils.data.DataLoader,
     loss_fn: torch.nn.Module,
@@ -61,7 +61,7 @@ def train_layer_separeate(
     else:
         last_act = torch.nn.Softmax(dim=1)
 
-    separate_layers, weights, biases = get_layers_config(model=model, in_size=in_size, max_params=5000)
+    separate_layers, weights, biases = get_groups_config(model=model, in_size=in_size, max_params=5000)
 
     os.makedirs(os.path.join(temp_folder, "inner_temp"), exist_ok=True)
 

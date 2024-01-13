@@ -48,7 +48,7 @@ def levenberg_step(
     y: torch.Tensor,
     loss_fn: Callable,
     mu: float,
-    val_loader: Union[torch.nn.DataLoader, None] = None,
+    val_loader: Union[torch.utils.data.DataLoader, None] = None,
     snap_folder: Union[str, None] = None,
     inner_steps: int = 10,
     demping_coef: float = 10,

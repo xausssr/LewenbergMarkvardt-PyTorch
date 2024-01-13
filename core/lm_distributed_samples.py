@@ -160,7 +160,7 @@ def train_distributed_levenberg(
     """Распределенное вычисление (по обучающим примерам) алгоритма Левенберга-Марквардта
 
     Args:
-        model (torch.nn.Module): модель для которой считается якобиан
+        model (torch.nn.Module): модель, которая оптимизируется
         x_loader (torch.utils.data.DataLoader): объект даталодера torch, batchsize будет соответсвовать размеру чанка
         loss_fn (torch.nn.Module): функция ошибки
         val_loader (Union[torch.utils.data.DataLoader, None]) даталодер с валидационными данными
