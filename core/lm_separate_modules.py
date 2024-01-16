@@ -1,66 +1,38 @@
-import copy
 import time
 from typing import Callable, List, Tuple, Union
 import torch
 from tqdm import tqdm
 
-from utils.weight_utils import extract_weights, get_weights_count, load_weights, snap_weights, update_weights
+from core.gpu_lm import compute_jacobian
 from utils.chekpoints import save_checkpoint, validate
+from utils.weight_utils import get_weights_count, snap_weights, update_weights
 
 
-def compute_jacobian(model: torch.nn.Module, x: torch.Tensor) -> torch.Tensor:
-    """Вычисление якобиана для модели по входным данным
-
-    Args:
-        model (torch.nn.Module): модель, для которой необходимо вычислить якобиан (инстанс pyTorch)
-        x (torch.Tensor): входные данные
-
-    Returns:
-        torch.Tensor: якобиан модели
-    """
-
-    jac_model = copy.deepcopy(model)
-    all_params, all_names = extract_weights(jac_model)
-    load_weights(jac_model, all_names, all_params)
-
-    def param_as_input_func(model, x, param):
-        load_weights(model, [name], [param])
-        out = model(x)
-        return out
-
-    jac = []
-    for i, (name, param) in enumerate(zip(all_names, all_params)):
-        jac.append(
-            torch.autograd.functional.jacobian(
-                lambda param: param_as_input_func(jac_model, x, param),
-                param,
-            ).flatten(start_dim=2)
-        )
-
-    jac = torch.cat(jac, dim=2)
-    del jac_model  # cleaning up
-    return jac.flatten(start_dim=0, end_dim=1)
-
-
-# TODO добавить критерий расхождения (1e-29 для float32)
-def levenberg_step(
+# TODO сделать float16 обучение
+def layer_separate_step(
     model: torch.nn.Module,
+    output: torch.Tensor,
     x: torch.Tensor,
     y: torch.Tensor,
     loss_fn: Callable,
-    mu: float,
+    mu: List[float],
     inner_steps: int = 10,
     demping_coef: float = 10,
     device: str = "cuda:0",
-) -> Tuple[float, float]:
-    """Один шаг алгоритма Левенберга-Марквардта
+) -> List[float]:
+    """Один шаг алгоритма Левенберга-Марквардта для разбитой на модули модели
+
+    Модель должна содержать все свои параметры в полях model.group_x, где x - номер группы, например,
+    model.group_0 - первая группа модели. Внутри группы допустима любая архитектура. Группировать таким
+    образом, что бы совокупное число параметров (весов) группы <= 7000 (для 12Gb VRAM)
 
     Args:
         model (torch.nn.Module): модель, которая оптимизируется
+        output (torch.Tensor): предыдущий отклик модели (на предыдущем шаге алгоритма)
         x (torch.Tensor): входные данные
         y (torch.Tensor): целевые метки
         loss_fn (Callable): функция ошибки (потерь)
-        mu (float): начальное значение коэффициента регуляризации
+        mu (List[float]): начальное значение коэффициента регуляризации - список рамером, равном количеству модулей
         val_loader (Union[torch.nn.DataLoader, None]) даталодер с валидационными данными
             (если есть - критерий останова на нем). Defaults to None.
         snap_folder (Union[str, None] = None) папка в которую складывать модели, если нет - не будет чекпоинтов
@@ -69,60 +41,60 @@ def levenberg_step(
         device (str, optional): устройство вычислений. Defaults to "cuda:0".
 
     Returns:
-        Tuple[float, float]: кортеж с коэффициентом регуляризации (mu) и ошибка после шага алгоритма
+        List[float]: список с коэффициентами регуляризации (mu) для каждой группы
     """
-    w_count = get_weights_count(model)
-    obj_count = x.shape[0]
 
-    if obj_count > 7_000:
-        if w_count > 7_000:
-            raise RuntimeError(
-                f"Слишком много данных для вычисления на GPU ({obj_count}x{w_count}), используйте "
-                "распределенный вариант"
-            )
-        else:
-            raise RuntimeError(
-                f"Слишком много данных для вычисления на GPU ({obj_count}x{w_count})"
-                ", используйте core.lm_distributed_samples"
-            )
-
-    output = model(x)
     last_loss = loss_fn(output, y)
+
+    model_groups = [x for x in dict(model.named_modules()).keys() if "group_lm_" in x and "." not in x]
+    group_sizes = [get_weights_count(getattr(model, x)) for x in model_groups]
+
     jac = compute_jacobian(model, x)
+    error = (y - output).flatten()
 
-    grad = jac.T @ (y - output).flatten()
-    snap = snap_weights(model)
+    shift = 0
+    for idx, (group_name, group_size) in enumerate(zip(model_groups, group_sizes)):
+        group = getattr(model, group_name)
+        snap = snap_weights(group)
+        _temp_jac = jac[:, shift : group_size + shift]
+        grad = _temp_jac.T @ error
+        for i in range(inner_steps):
+            approx_hess = _temp_jac.T @ _temp_jac + mu[idx] * torch.eye(_temp_jac.shape[1]).to(device)
+            delta_w = (torch.inverse(approx_hess) @ grad).flatten()
+            update_weights(group, snap + delta_w, device=device)
+            output = model(x)
+            curr_loss = loss_fn(output, y)
 
-    for i in range(inner_steps):
-        approx_hess = jac.T @ jac + mu * torch.eye(jac.shape[1]).to(device)
-        delta_w = (torch.inverse(approx_hess) @ grad).flatten()
-        update_weights(model, snap + delta_w, device=device)
-        output = model(x)
-        curr_loss = loss_fn(output, y)
-        if curr_loss <= last_loss:
-            return mu / demping_coef, curr_loss.item()
-        else:
-            update_weights(model, snap, device=device)
-            mu *= demping_coef
+            if curr_loss <= last_loss:
+                mu[idx] /= demping_coef
+                break
+            else:
+                update_weights(group, snap, device=device)
+                mu[idx] *= demping_coef
 
-    return mu, curr_loss.item()
+        shift += group_size
+
+    return mu
 
 
-def train_levenberg(
+# TODO привести все аргументы к одному виду (во всех подходах)
+def train_levenberg_module_separate(
     model: torch.nn.Module,
     x: torch.Tensor,
     y: torch.Tensor,
     loss_fn: Callable,
+    min_error: float,
+    max_epochs: int,
     val_loader: Union[torch.utils.data.DataLoader, None] = None,
     snap_folder: Union[str, None] = None,
-    mu_init: float = 10,
-    min_error: float = 1e-4,
-    max_epochs: int = 10,
+    mu_init: float = 0.1,
     inner_steps: int = 10,
-    demping_coef: float = 10,
-    device: str = "cuda:0",
+    demping_coef: int = 5,
+    device="cuda:0",
 ) -> Tuple[List[float], List[float], List[float], List[float]]:
-    """Обучение с помощью алгоритма Левенберга-Марквардта на GPU (все матрицы в памяти, нет кеширования на диск)
+    """Обучение с помощью алгоритма Левенберга-Марквардта на GPU для групп в моделе.
+    Превосходит Adam по скорости, а Левенберга-Марквардта по использованию памяти - нечто среднее.
+    Рекомендуется группы формировать по 7000 параметров, в зависимости от архитектуры - 2-4 слоёв в группе
 
     Args:
         model (torch.nn.Module): модель, которая оптимизируется
@@ -143,28 +115,34 @@ def train_levenberg(
         Tuple[List[float], List[float], List[float], List[float]]:
             кортеж со списками истории обучения: ошибка, ошибка валидации, регуляризатор (mu), время вычислений на эпоху
     """
+
+    model_groups = [x for x in dict(model.named_modules()).keys() if "group_lm_" in x and "." not in x]
+    mu = [mu_init] * len(model_groups)
+    output = model(x)
+
     loss_history = []
     val_loss_hisory = []
     if val_loader is not None:
         val_loss_hisory.append(validate(model, val_loader, loss_fn))
-
-    mu_history = [mu_init]
-    ep_time = [0]
-
-    mu = mu_init
-    output = model(x)
     loss_history.append(loss_fn(output, y).item())
 
+    mu_history = {x: [] for x in model_groups}
+    ep_time = [0]
+
     pbar = tqdm(range(max_epochs))
-    pbar.set_description(f"Loss: {loss_history[-1]:.4f}")
+    pbar.set_description(f"MSE: {loss_history[-1]:.4f}")
     for ep in pbar:
         start_ep = time.time()
-        mu, loss = levenberg_step(
-            model, x, y, loss_fn, mu, inner_steps=inner_steps, demping_coef=demping_coef, device=device
+        mu = layer_separate_step(
+            model, output, x, y, loss_fn, mu, inner_steps=inner_steps, demping_coef=demping_coef, device=device
         )
+        output = model(x)
+        loss = loss_fn(output, y).item()
         ep_time.append(time.time() - start_ep)
+
         loss_history.append(loss)
-        mu_history.append(mu)
+        for mu_idx, k in enumerate(mu_history.keys()):
+            mu_history[k].append(mu[mu_idx])
 
         addition = ""
         if val_loader is not None:
@@ -183,5 +161,10 @@ def train_levenberg(
         else:
             if val_loss <= min_error:
                 break
+
+        for last_mu in mu:
+            if last_mu > 1e29:
+                pbar.set_description("Обучение остановлено (числовая нестабильность)")
+                return loss_history, mu_history, ep_time
 
     return loss_history, val_loss_hisory, mu_history, ep_time

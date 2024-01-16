@@ -85,7 +85,7 @@ def distributed_levenberg_step(
     inner_steps: int = 10,
     demping_coef: int = 10,
     device: str = "cuda:0",
-):
+) -> Tuple[float, float]:
     """Вычисление шага алгоритма Левенберга-Марквардта
 
     Args:
@@ -103,7 +103,7 @@ def distributed_levenberg_step(
         RuntimeError: _description_
 
     Returns:
-        _type_: _description_
+        Tuple[float, float]: текущее значение mu и ошибки
     """
     # Чтение якобиана
     jac = load_delayed(os.path.join(temp_folder, "jacobian*"))
