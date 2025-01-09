@@ -93,7 +93,7 @@ def levenberg_step(
     grad = jac.T @ (y - output).flatten()
     snap = snap_weights(model)
 
-    for i in range(inner_steps):
+    for _ in range(inner_steps):
         approx_hess = jac.T @ jac + mu * torch.eye(jac.shape[1]).to(device)
         delta_w = (torch.inverse(approx_hess) @ grad).flatten()
         update_weights(model, snap + delta_w, device=device)
@@ -159,9 +159,16 @@ def train_levenberg(
     pbar.set_description(f"Loss: {loss_history[-1]:.4f}")
     for ep in pbar:
         start_ep = time.time()
-        mu, loss = levenberg_step(
-            model, x, y, loss_fn, mu, inner_steps=inner_steps, demping_coef=demping_coef, device=device
-        )
+        try:
+            mu, loss = levenberg_step(
+                model, x, y, loss_fn, mu, inner_steps=inner_steps, demping_coef=demping_coef, device=device
+            )
+        except torch.linalg.LinAlgError:
+            print(
+                "Алгоритм достиг локального минимума, при неудовлетворительных результатах - переинициализировать обучение"
+            )
+            return loss_history, val_loss_hisory, mu_history, ep_time
+
         ep_time.append(time.time() - start_ep)
         loss_history.append(loss)
         mu_history.append(mu)
@@ -176,7 +183,6 @@ def train_levenberg(
             save_checkpoint(model, snap_folder, ep)
 
         pbar.set_description(f"MSE: {loss:.3f}{addition}")
-        pbar.update(1)
         if val_loader is None:
             if loss <= min_error:
                 break
