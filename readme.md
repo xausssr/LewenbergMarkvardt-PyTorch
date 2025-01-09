@@ -98,18 +98,19 @@ torch.save(model.state_dict, 'weights.pkl')
 ```
 
 **Описание аргументов:**
-    `model (torch.nn.Module)`: модель, которая оптимизируется
-    `x (torch.Tensor)`: входные данные
-    `y (torch.Tensor)`: целевые метки
-    `loss_fn (Callable)`: функция ошибки (потерь)
-    `val_loader (Union[torch.utils.data.DataLoader, None])`: даталодер с валидационными данными (если есть - `min_error` счиатется на нем). `Defaults to None.`
-    `snap_folder (Union[str, None] = None)`: папка в которую складывать модели, если нет - не будет чекпоинтов
-    `mu_init (float, optional)`: начальное значение коэффициента регуляризации. `Defaults to 10.`
-    `min_error (float, optional)`: минимальная ошибка при которой останавливается обучение. `Defaults to 1e-2.`
-    `max_epochs (int, optional)`: максимльное число эпох при которых останавливается обучение. `Defaults to 10.`
-    `inner_steps (int, optional)`: количество внутренних шагов. `Defaults to 10.`
-    `demping_coef (float, optional)`: коэффициент изменения регуляризации. `Defaults to 10.`
-    `device (str, optional)`: устройство вычислений. `Defaults to "cuda:0".`
+   
+* `model (torch.nn.Module)`: модель, которая оптимизируется
+* `x (torch.Tensor)`: входные данные
+* `y (torch.Tensor)`: целевые метки
+* `loss_fn (Callable)`: функция ошибки (потерь)
+* `val_loader (Union[torch.utils.data.DataLoader, None])`: даталодер с валидационными данными (если есть - `min_error` счиатется на нем). `Defaults to None.`
+* `snap_folder (Union[str, None] = None)`: папка в которую складывать модели, если нет - не будет чекпоинтов
+* `mu_init (float, optional)`: начальное значение коэффициента регуляризации. `Defaults to 10.`
+* `min_error (float, optional)`: минимальная ошибка при которой останавливается обучение. `Defaults to 1e-2.`
+* `max_epochs (int, optional)`: максимльное число эпох при которых останавливается обучение. `Defaults to 10.`
+* `inner_steps (int, optional)`: количество внутренних шагов. `Defaults to 10.`
+* `demping_coef (float, optional)`: коэффициент изменения регуляризации. `Defaults to 10.`
+* `device (str, optional)`: устройство вычислений. `Defaults to "cuda:0".`
 
 **Возвращает:**
 `Tuple[List[float], List[float], List[float], List[float]]`: кортеж со списками истории обучения: ошибка, ошибка валидации, регуляризатор (mu), время вычислений на эпоху
@@ -186,18 +187,18 @@ torch.save(model.state_dict, 'weights.pkl')
 ```
 
 **Описание аргументов:**
-`model (torch.nn.Module)`: модель, которая оптимизируется
-`x_loader (torch.utils.data.DataLoader)`: объект даталодера torch, batchsize будет соответсвовать размеру чанка
-`loss_fn (torch.nn.Module)`: функция ошибки
-`val_loader (Union[torch.utils.data.DataLoader, None])`: даталодер с валидационными данными (если есть - `min_error` счиатется на нем). `Defaults to None.`
-`snap_folder (Union[str, None] = None)`: папка в которую складывать модели, если нет - не будет чекпоинтов. `Defaults to None.`
-`mu_init (int, optional)`: начальное значение коэффициента регуляризации. `Defaults to 10.`
-`min_error (float, optional)`: минимальная ошибка при которой останавливается обучение. `Defaults to 1e-2.`
-`max_epochs (int, optional)`: максимльное число эпох при которых останавливается обучение. `Defaults to 10.`
-`inner_steps (int, optional)`: количество внутренних шагов. `Defaults to 10.`
-`demping_coef (float, optional)`: коэффициент изменения регуляризации. `Defaults to 10.`
-`device (str, optional)`: устройство вычислений. `Defaults to "cuda:0".`
-`temp_folder (str, optional)`: папка с кешами (удаляется после обучения). `Defaults to "./temp".`
+* `model (torch.nn.Module)`: модель, которая оптимизируется
+* `x_loader (torch.utils.data.DataLoader)`: объект даталодера torch, batchsize будет соответсвовать размеру чанка
+* `loss_fn (torch.nn.Module)`: функция ошибки
+* `val_loader (Union[torch.utils.data.DataLoader, None])`: даталодер с валидационными данными (если есть - `min_error` счиатется на нем). `Defaults to None.`
+* `snap_folder (Union[str, None] = None)`: папка в которую складывать модели, если нет - не будет чекпоинтов. `Defaults to None.`
+* `mu_init (int, optional)`: начальное значение коэффициента регуляризации. `Defaults to 10.`
+* `min_error (float, optional)`: минимальная ошибка при которой останавливается обучение. `Defaults to 1e-2.`
+* `max_epochs (int, optional)`: максимльное число эпох при которых останавливается обучение. `Defaults to 10.`
+* `inner_steps (int, optional)`: количество внутренних шагов. `Defaults to 10.`
+* `demping_coef (float, optional)`: коэффициент изменения регуляризации. `Defaults to 10.`
+* `device (str, optional)`: устройство вычислений. `Defaults to "cuda:0".`
+* `temp_folder (str, optional)`: папка с кешами (удаляется после обучения). `Defaults to "./temp".`
 
 **Возвращает:**
 `Tuple[List[float], List[float], List[float], List[float]]`: кортеж со списками истории обучения: ошибка, ошибка валидации, регуляризатор (mu), время вычислений на эпоху
