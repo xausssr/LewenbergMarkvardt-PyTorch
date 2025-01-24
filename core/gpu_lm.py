@@ -42,7 +42,6 @@ def compute_jacobian(model: torch.nn.Module, x: torch.Tensor) -> torch.Tensor:
     return jac.flatten(start_dim=0, end_dim=1)
 
 
-# TODO добавить критерий расхождения (1e-29 для float32)
 def levenberg_step(
     model: torch.nn.Module,
     x: torch.Tensor,
@@ -121,6 +120,7 @@ def train_levenberg(
     inner_steps: int = 10,
     demping_coef: float = 10,
     device: str = "cuda:0",
+    metric_callbacks: list[Callable] = list(),
 ) -> Tuple[List[float], List[float], List[float], List[float]]:
     """Обучение с помощью алгоритма Левенберга-Марквардта на GPU (все матрицы в памяти, нет кеширования на диск)
 
@@ -134,10 +134,12 @@ def train_levenberg(
         snap_folder (Union[str, None] = None) папка в которую складывать модели, если нет - не будет чекпоинтов
         mu_init (float, optional): начальное значение коэффициента регуляризации. Defaults to 10.
         min_error (float, optional): минимальная ошибка при которой останавливается обучение. Defaults to 1e-2.
-        max_epochs (int, optional): максимльное число эпох при которых останавливается обучение. Defaults to 10.
+        max_epochs (int, optional): максимальное число эпох при которых останавливается обучение. Defaults to 10.
         inner_steps (int, optional): количество внутренних шагов. Defaults to 10.
         demping_coef (float, optional): коэффициент изменения регуляризации. Defaults to 10.
         device (str, optional): устройство вычислений. Defaults to "cuda:0".
+        metric_callbacks (list[Callable], optional): список callback'ов для вычисления метрик,
+            вызываемых после каждой итерации валидации (включая начальную)
 
     Returns:
         Tuple[List[float], List[float], List[float], List[float]]:
@@ -154,6 +156,9 @@ def train_levenberg(
     mu = mu_init
     output = model(x)
     loss_history.append(loss_fn(output, y).item())
+    if len(metric_callbacks) > 0:
+        for func in metric_callbacks:
+            func()
 
     pbar = tqdm(range(max_epochs))
     pbar.set_description(f"Loss: {loss_history[-1]:.4f}")
@@ -165,13 +170,18 @@ def train_levenberg(
             )
         except torch.linalg.LinAlgError:
             print(
-                "Алгоритм достиг локального минимума, при неудовлетворительных результатах - переинициализировать обучение"
+                "Алгоритм достиг локального минимума, при неудовлетворительных результатах - "
+                "переинициализировать обучение"
             )
             return loss_history, val_loss_hisory, mu_history, ep_time
 
         ep_time.append(time.time() - start_ep)
         loss_history.append(loss)
         mu_history.append(mu)
+
+        if len(metric_callbacks) > 0:
+            for func in metric_callbacks:
+                func()
 
         addition = ""
         if val_loader is not None:
