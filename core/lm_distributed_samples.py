@@ -2,7 +2,7 @@ import copy
 import os
 import shutil
 import time
-from typing import List, Tuple, Union
+from typing import List, Tuple, Union, Callable
 
 import numpy as np
 import dask
@@ -86,6 +86,7 @@ def distributed_levenberg_step(
     inner_steps: int = 10,
     demping_coef: int = 10,
     device: str = "cuda:0",
+    metric_callbacks: list[Callable] = list(),
 ) -> Tuple[float, float]:
     """Вычисление шага алгоритма Левенберга-Марквардта
 
@@ -157,6 +158,7 @@ def train_distributed_levenberg(
     demping_coef: float = 10,
     device: str = "cuda:0",
     temp_folder: str = "./temp",
+    metric_callbacks: list[Callable] = list(),
 ) -> Tuple[List[float], List[float], List[float], List[float]]:
     """Распределенное вычисление (по обучающим примерам) алгоритма Левенберга-Марквардта
 
@@ -174,6 +176,8 @@ def train_distributed_levenberg(
         demping_coef (float, optional): коэффициент изменения регуляризации. Defaults to 10.
         device (str, optional): устройство вычислений. Defaults to "cuda:0".
         temp_folder (str, optional): папка с кешами. Defaults to "./temp".
+        metric_callbacks (list[Callable], optional): список callback'ов для вычисления метрик,
+            вызываемых после каждой итерации валидации (включая начальную)
 
     Returns:
         Tuple[List[float], List[float], List[float], List[float]]:
@@ -183,6 +187,9 @@ def train_distributed_levenberg(
     val_loss_hisory = []
     if val_loader is not None:
         val_loss_hisory.append(validate(model, val_loader, loss_fn))
+    if len(metric_callbacks) > 0:
+        for func in metric_callbacks:
+            func()
 
     mu_history = [mu_init]
     ep_time = [0]
@@ -222,6 +229,9 @@ def train_distributed_levenberg(
             val_loss = validate(model, val_loader, loss_fn)
             val_loss_hisory.append(val_loss)
             addition = f" val: {val_loss:.3f}"
+            if len(metric_callbacks) > 0:
+                for func in metric_callbacks:
+                    func()
 
         if snap_folder is not None:
             save_checkpoint(model, snap_folder, ep)

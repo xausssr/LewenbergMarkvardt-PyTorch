@@ -52,6 +52,7 @@ sys.path.append("<...>/LewenbergMarkvardt/lib")
 
 from core.gpu_lm import train_levenberg
 from utils.visualisation_utils import plot_train_report
+from sklearn.metrics import balanced_accuracy_score
 
 # входные данные
 x = ... # torch.FloatTensor
@@ -69,6 +70,18 @@ model = torch.nn.Sequential(
 # Функкция ошибки, рекомендована MSELoss (исходя из теоретических соображений оптимизации методами 2 порядка)
 loss_fn = torch.nn.MSELoss()
 
+# Добавление пользовательских метрик (callback вызывается при валидации)
+acc_train = []
+acc_val = []
+
+def callback():
+    """Пример пользовательской метрики"""
+    preds_train = net(x).detach().cpu().numpy().argmax(axis=1)
+    preds_val = net(x_val).detach().cpu().numpy().argmax(axis=1)
+    acc_train.append(accuracy_score(true_train, preds_train))
+    acc_val.append(accuracy_score(true_val, preds_val))
+
+
 loss_history, val_history, mu_history, ep_time = train_levenberg(
     model,
     x,
@@ -82,6 +95,7 @@ loss_history, val_history, mu_history, ep_time = train_levenberg(
     inner_steps=10,
     demping_coef=10,
     device="cuda:0",
+    metrics_callbacks=[callback],
 )
 
 # Сохраняем все метрики
@@ -111,6 +125,7 @@ torch.save(model.state_dict, 'weights.pkl')
 * `inner_steps (int, optional)`: количество внутренних шагов. `Defaults to 10.`
 * `demping_coef (float, optional)`: коэффициент изменения регуляризации. `Defaults to 10.`
 * `device (str, optional)`: устройство вычислений. `Defaults to "cuda:0".`
+* `metric_callbacks (list[Callable], optional)`: список callback'ов для вычисления метрик, вызываемых после каждой итерации валидации (включая начальную)
 
 **Возвращает:**
 `Tuple[List[float], List[float], List[float], List[float]]`: кортеж со списками истории обучения: ошибка, ошибка валидации, регуляризатор (mu), время вычислений на эпоху
@@ -171,6 +186,7 @@ loss_history, val_history, mu_history, ep_time = train_distributed_levenberg(
     demping_coef=10,
     device="cuda:0",
     temp_folder="./temp",
+    metrics_callbacks=[callback], # см. в примере `Классический Левенберг-Марквардт`
 )
 
 # Сохраняем все метрики
@@ -199,6 +215,7 @@ torch.save(model.state_dict, 'weights.pkl')
 * `demping_coef (float, optional)`: коэффициент изменения регуляризации. `Defaults to 10.`
 * `device (str, optional)`: устройство вычислений. `Defaults to "cuda:0".`
 * `temp_folder (str, optional)`: папка с кешами (удаляется после обучения). `Defaults to "./temp".`
+* `metric_callbacks (list[Callable], optional)`: список callback'ов для вычисления метрик, вызываемых после каждой итерации валидации (включая начальную)
 
 **Возвращает:**
 `Tuple[List[float], List[float], List[float], List[float]]`: кортеж со списками истории обучения: ошибка, ошибка валидации, регуляризатор (mu), время вычислений на эпоху
