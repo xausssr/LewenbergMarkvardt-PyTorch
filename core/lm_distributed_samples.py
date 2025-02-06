@@ -144,7 +144,6 @@ def distributed_levenberg_step(
     return mu, curr_loss
 
 
-# TODO добавить отключение прогресбара при обучении
 def train_distributed_levenberg(
     model: torch.nn.Module,
     x_loader: torch.utils.data.DataLoader,
@@ -159,6 +158,7 @@ def train_distributed_levenberg(
     device: str = "cuda:0",
     temp_folder: str = "./temp",
     metric_callbacks: list[Callable] = list(),
+    verbose: bool = True,
 ) -> Tuple[List[float], List[float], List[float], List[float]]:
     """Распределенное вычисление (по обучающим примерам) алгоритма Левенберга-Марквардта
 
@@ -178,6 +178,7 @@ def train_distributed_levenberg(
         temp_folder (str, optional): папка с кешами. Defaults to "./temp".
         metric_callbacks (list[Callable], optional): список callback'ов для вычисления метрик,
             вызываемых после каждой итерации валидации (включая начальную)
+        verbose (bool): отбражение прогрессбара при обучении
 
     Returns:
         Tuple[List[float], List[float], List[float], List[float]]:
@@ -194,7 +195,7 @@ def train_distributed_levenberg(
     mu_history = [mu_init]
     ep_time = [0]
     mu = mu_init
-    pbar = tqdm(range(max_epochs))
+    pbar = tqdm(range(max_epochs), disable=not verbose)
 
     os.makedirs(temp_folder, exist_ok=True)
     os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
